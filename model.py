@@ -10,7 +10,6 @@ import torch_xla.distributed.xla_multiprocessing as xmp
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 
-best_validation_loss = float('inf')
 
 class CVAELoss(torch.nn.Module):
     def __init__(self, beta_start=0.1, beta_end=1.0, beta_steps=1000):
@@ -106,23 +105,9 @@ test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
 feature_dim = X_train_tensor.shape[1]
 condition_dim = era_conditions_train_tensor.shape[1]
-latent_dim = 30
+latent_dim = 20
 num_epochs = 100
 
-import os
-import torch
-
-
-# Imports the torch_xla package
-import torch_xla
-import torch_xla.core.xla_model as xm
-
-device = xm.xla_device()
-print(f'Running on TPU {device}')
-
-# Example: Creating a tensor on the TPU
-tensor = torch.rand(2, 2, device=device)
-print(tensor)
 
 def save_checkpoint(model, optimizer, epoch, loss, filename="cvae_checkpoint.pth"):
     """
@@ -145,6 +130,8 @@ def save_checkpoint(model, optimizer, epoch, loss, filename="cvae_checkpoint.pth
 def train_model(rank, num_epochs=num_epochs):
     torch.set_default_dtype(torch.float32)
     device = xm.xla_device()
+
+    best_validation_loss = float('inf')
     
     model = CVAE(feature_dim=feature_dim, condition_dim=condition_dim, latent_dim=latent_dim).to(device)
     loss_fn = CVAELoss(beta_start=0.1, beta_end=1.0, beta_steps=5000)
@@ -164,7 +151,7 @@ def train_model(rank, num_epochs=num_epochs):
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
     for epoch in range(num_epochs):
-        #model.train()
+        model.train()
         train_sampler.set_epoch(epoch)
         total_loss = 0
         para_loader = pl.ParallelLoader(train_loader, [device])
@@ -181,6 +168,8 @@ def train_model(rank, num_epochs=num_epochs):
         loss_reduced = xm.mesh_reduce('loss_reduce', total_loss, lambda x: sum(x) / len(x))
         xm.master_print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss_reduced:.4f}')
 
+        print(met.metrics_report())
+
         # Evaluation step
         if epoch % 10 == 0:
             model.eval()
@@ -193,6 +182,8 @@ def train_model(rank, num_epochs=num_epochs):
             validation_loss_reduced = xm.mesh_reduce('val_loss_reduce', validation_loss, lambda x: sum(x) / len(x)) 
             xm.master_print(f'Validation Loss: {validation_loss_reduced / len(test_loader):.4f}')
             
+            print(met.metrics_report())
+
             # Save checkpoint if validation loss improved
             if validation_loss_reduced < best_validation_loss and xm.is_master_ordinal():
                 xm.master_print(f'Saving checkpoint at epoch {epoch+1} with validation loss {validation_loss_reduced:.4f}')
@@ -207,3 +198,4 @@ def _mp_fn(rank, flags):
 FLAGS={}
 xmp.spawn(_mp_fn, args=(FLAGS,), nprocs=8, start_method='fork')
 
+#optimization
