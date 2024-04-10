@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -196,6 +195,6 @@ def _mp_fn(rank, flags):
     train_model(rank, num_epochs=100)
 
 FLAGS={}
-xmp.spawn(_mp_fn, args=(FLAGS,), nprocs=8, start_method='fork')
+xmp.spawn(_mp_fn, args=(FLAGS,), nprocs=xm.xrt_world_size(), start_method='fork')
 
 #optimization
